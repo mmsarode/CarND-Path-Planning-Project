@@ -849,4 +849,6 @@ Eigen-3.3/Eigen/QR
 /home/mahesh/udacity/term3/CarND-Path-Planning-Project/src/Eigen-3.3/Eigen/QR
 json.hpp
 /home/mahesh/udacity/term3/CarND-Path-Planning-Project/src/json.hpp
+spline.h
+/home/mahesh/udacity/term3/CarND-Path-Planning-Project/src/spline.h
 
