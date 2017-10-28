@@ -199,10 +199,11 @@ int main() {
   }
   // start in lane 1
   int lane = 1;
+  bool lane_change_active = false;
 
   double ref_vel = 0; //mph
 
-  h.onMessage([&lane, & ref_vel, &map_waypoints_x,&map_waypoints_y,&map_waypoints_s,&map_waypoints_dx,&map_waypoints_dy](uWS::WebSocket<uWS::SERVER> ws, char *data, size_t length,
+  h.onMessage([&lane_change_active, &lane, & ref_vel, &map_waypoints_x,&map_waypoints_y,&map_waypoints_s,&map_waypoints_dx,&map_waypoints_dy](uWS::WebSocket<uWS::SERVER> ws, char *data, size_t length,
                      uWS::OpCode opCode) {
     // "42" at the start of the message means there's a websocket message event.
     // The 4 signifies a websocket message
@@ -247,12 +248,101 @@ int main() {
             }
 
             bool too_close = false;
-
+            bool slighty_close = false;
+            bool collision_bit = false;
+            bool left_safe = true;
+            bool right_safe = true;
+            double left_buffer = 100000;
+            double right_buffer = 100000;
+            // double prev_lane = lane;
+            
             //find ref_v to use
             for(int i = 0; i < sensor_fusion.size(); i++)
             {
               //car is in my lane
               float d = sensor_fusion[i][6];
+              double vx = sensor_fusion[i][3];
+              double vy = sensor_fusion[i][4];
+              double check_speed = sqrt(vx*vx + vy*vy);
+              double check_car_s = sensor_fusion[i][5];
+
+              check_car_s += ((double)prev_size*0.02*check_speed); //
+
+              // distance other car would travel if lane change manoveur is performed now
+              double check_car_s_LC = check_car_s + check_speed*(30/(car_speed*0.44704));
+              double car_s_LC = car_s + 30;
+
+              //check left lane 
+              if( (lane > 0) &&  (d < (2+4*(lane-1)+2) && d > (2+4*(lane-1)-2)))
+              {
+                if(abs(check_car_s - car_s) < 4)
+                {
+                  left_safe = false;
+                }
+
+                // if((check_car_s_LC >= car_s_LC) && ((check_car_s_LC - car_s_LC) < 20))
+                // {
+                //   left_safe = false;
+                // }
+                // else if((check_car_s_LC < car_s_LC) && ((car_s_LC - check_car_s_LC) < 5))
+                // {
+                //   left_safe = false;
+                // }
+
+                if((check_car_s_LC >= car_s_LC)) 
+                { 
+                  if (left_buffer > (check_car_s_LC - car_s_LC))
+                  {
+                    left_buffer = (check_car_s_LC - car_s_LC);
+                  }
+
+                  if ((check_car_s_LC - car_s_LC) < 20)
+                  {
+                    left_safe = false;
+                  }                  
+                }
+                else if((check_car_s_LC < car_s_LC) && ((car_s_LC - check_car_s_LC) < 5))
+                {
+                  left_safe = false;
+                }
+              }
+
+              //check right lane 
+              if( (lane < 2) &&  (d < (2+4*(lane+1)+2) && d > (2+4*(lane+1)-2)))
+              {
+                if(abs(check_car_s - car_s) < 4)
+                {
+                  right_safe = false;
+                }
+                // if((check_car_s_LC >= car_s_LC) && ((check_car_s_LC - car_s_LC) < 20))
+                // {
+                //   right_safe = false;
+
+                // }
+                // else if((check_car_s_LC < car_s_LC) && ((car_s_LC - check_car_s_LC) < 5))
+                // {
+                //     right_safe = false;
+                // }
+                if((check_car_s_LC >= car_s_LC))
+                {
+                  if (right_buffer > (check_car_s_LC - car_s_LC))
+                  {
+                    right_buffer = (check_car_s_LC - car_s_LC);
+                  }
+
+                  if ((check_car_s_LC - car_s_LC) < 20)
+                  {
+                    right_safe = false;
+                  }
+                  
+                }
+                else if((check_car_s_LC < car_s_LC) && ((car_s_LC - check_car_s_LC) < 5))
+                {
+                    right_safe = false;
+                }
+                  
+              }
+
               if(d < (2+4*lane+2) && d > (2+4*lane-2))
               {
                 double vx = sensor_fusion[i][3];
@@ -262,7 +352,33 @@ int main() {
 
                 check_car_s += ((double)prev_size*0.02*check_speed); //
                 // check s values greater than mine and s gap
-                if((check_car_s > car_s) && ((check_car_s - car_s) < 30))
+
+                // if((check_car_s > car_s) && ((check_car_s - car_s) < 30))
+                // {
+                //   slighty_close = true;
+                //   // left_lane_safe()
+
+                // }
+
+                if((check_car_s > car_s))
+                {
+                  if ((check_car_s - car_s) < 7)
+                  {
+                    collision_bit = true;
+                  }
+                  else if ((check_car_s - car_s) < 20)
+                  {
+                    too_close = true;
+                  }
+                  else if ((check_car_s - car_s) < 30)
+                  {
+                    slighty_close = true;
+                  }
+                  
+
+                }
+
+                if((check_car_s > car_s) && ((check_car_s - car_s) < 20))
                 {
 
                   //Logic to lower reference velocity so we dont crash into the car in front of us
@@ -271,12 +387,20 @@ int main() {
                   //or use flag to change lane
 
                   too_close = true;
+                  // if(lane > 0)
+                  // {
+                  //   lane = 0;
+                  // }
 
                 }
 
               }
-            }
+            } 
 
+            if(collision_bit)
+            {
+              ref_vel -= 0.224*2;
+            }
             if(too_close)
             {
               ref_vel -= 0.224; //5 m/s (mph)
@@ -285,6 +409,69 @@ int main() {
             {
               ref_vel += 0.224;
             }
+
+            if (lane_change_active == false)
+            {
+              if(slighty_close)
+              {
+                if(left_safe && right_safe)
+                {
+                  if((right_buffer <= left_buffer) && (lane > 0))
+                  {
+                    lane -= 1;
+                    lane_change_active = true;
+                  }
+                  else if(lane < 2)
+                  {
+                    lane += 1;
+                    lane_change_active = true;
+                  }
+                }
+                else if(left_safe && (lane > 0))
+                {
+                  lane -= 1;
+                  lane_change_active = true;
+                }
+                else if(right_safe && (lane < 2))
+                {
+                  lane += 1;
+                  lane_change_active = true;
+                }
+              }
+
+            }
+
+            if(car_d < (2+4*lane+0.7) && car_d > (2+4*lane-0.7))
+            {
+              lane_change_active = false;
+            }
+
+
+
+            // if(slighty_close)
+            // {
+            //   if(left_safe && right_safe)
+            //   {
+            //     if((right_buffer >= left_buffer) && (lane > 0))
+            //     {
+            //       lane -= 1;
+            //     }
+            //     else if(lane < 2)
+            //     {
+            //       lane += 1;
+            //     }
+            //   }
+            //   else if(left_safe && (lane > 0))
+            //   {
+            //     lane -= 1;
+            //   }
+            //   else if(right_safe && (lane < 2))
+            //   {
+            //     lane += 1;
+            //   }
+            // }
+
+
 
 
 
